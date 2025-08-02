@@ -212,6 +212,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   {connectedStores.some(s => s.isValid === false) && (
                     <div className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900 p-2 rounded border border-amber-200 dark:border-amber-700">
                       <strong>Warning:</strong> Some stores have invalid tokens. 
+<<<<<<< HEAD
                       <Link href="/connect-store" className="underline hover:no-underline">
                         Reconnect them
                       </Link>
