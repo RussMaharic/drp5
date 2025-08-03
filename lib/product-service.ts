@@ -69,90 +69,88 @@ export class ProductService {
     try {
       console.log('🔍 PRODUCT SERVICE - Getting supplier products...')
       
-      // Try to refresh session first if it's missing
-      let user = null
-      let userError = null
+      // Try to get supplier ID with multiple fallbacks
+      let supplierId: string | null = null
       
+      // Method 1: Try Supabase auth first
       try {
-        const authResult = await supabase.auth.getUser()
-        user = authResult.data.user
-        userError = authResult.error
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        
+        if (!userError && user) {
+          console.log('✅ PRODUCT SERVICE - Found authenticated user:', user.email)
+          
+          // Get supplier data from suppliers table using user email
+          const { data: supplierData, error: supplierError } = await supabase
+            .from('suppliers')
+            .select('username')
+            .eq('email', user.email)
+            .single()
+
+          if (!supplierError && supplierData) {
+            supplierId = supplierData.username
+            console.log('✅ PRODUCT SERVICE - Found supplier ID from DB:', supplierId)
+          }
+        }
       } catch (error) {
-        console.log('⚠️ Initial auth check failed, trying session refresh...')
+        console.log('⚠️ PRODUCT SERVICE - Supabase auth failed, trying session refresh...')
         try {
-          // Try to refresh the session
           const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
           if (refreshData.user) {
-            user = refreshData.user
-            userError = null
-            console.log('✅ Session refreshed successfully')
-          } else {
-            userError = refreshError
+            console.log('✅ PRODUCT SERVICE - Session refreshed successfully')
+            
+            // Get supplier data from suppliers table using user email
+            const { data: supplierData, error: supplierError } = await supabase
+              .from('suppliers')
+              .select('username')
+              .eq('email', refreshData.user.email)
+              .single()
+
+            if (!supplierError && supplierData) {
+              supplierId = supplierData.username
+              console.log('✅ PRODUCT SERVICE - Found supplier ID after refresh:', supplierId)
+            }
           }
         } catch (refreshErr) {
-          console.log('❌ Session refresh also failed:', refreshErr)
-          userError = refreshErr
+          console.log('❌ PRODUCT SERVICE - Session refresh also failed')
         }
       }
       
-      console.log('🔐 PRODUCT SERVICE - Auth check:', { 
-        hasUser: !!user, 
-        email: user?.email, 
-        error: userError?.message 
-      })
-      
-      if (userError || !user) {
-        console.error('❌ Error getting authenticated user:', userError)
-        // Fallback to localStorage for compatibility
-        console.log('🔄 Falling back to localStorage authentication...')
+      // Method 2: Fallback to localStorage
+      if (!supplierId) {
         const supplierName = localStorage.getItem('supplierName')
         if (supplierName) {
-          console.log('📦 PRODUCT SERVICE - Querying products with localStorage supplier_id:', supplierName)
-          
-          const { data, error } = await supabase
-            .from('products')
-            .select('*')
-            .eq('supplier_id', supplierName)
-            .order('created_at', { ascending: false })
-
-          console.log('📊 PRODUCT SERVICE - Query result (localStorage):', { 
-            error: error?.message,
-            productCount: data?.length || 0,
-            products: data?.map(p => ({ id: p.id, title: p.title, supplier_id: p.supplier_id, status: p.status })) || []
-          })
-
-          if (error) {
-            console.error('❌ Error fetching products with localStorage fallback:', error)
-            return []
-          }
-
-          return data || []
+          supplierId = supplierName
+          console.log('📦 PRODUCT SERVICE - Using localStorage fallback:', supplierId)
         }
-        return []
       }
-
-      // Get supplier data from suppliers table using user email
-      const { data: supplierData, error: supplierError } = await supabase
-        .from('suppliers')
-        .select('username')
-        .eq('email', user.email)
-        .single()
-
-      console.log('👤 PRODUCT SERVICE - Supplier lookup:', { 
-        email: user.email,
-        supplierData, 
-        error: supplierError?.message 
-      })
-
-      let supplierId: string
-      if (supplierError || !supplierData) {
-        // Fallback to localStorage for backwards compatibility
-        supplierId = localStorage.getItem('supplierName') || 'Unknown User'
-        console.log('⚠️ PRODUCT SERVICE - Using localStorage fallback:', supplierId)
-      } else {
-        // Use the actual username from suppliers table
-        supplierId = supplierData.username
-        console.log('✅ PRODUCT SERVICE - Using DB supplier ID:', supplierId)
+      
+      // Method 3: Try to get from session token
+      if (!supplierId) {
+        try {
+          const sessionToken = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1]
+          if (sessionToken) {
+            const response = await fetch('/api/auth/verify-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionToken })
+            })
+            
+            if (response.ok) {
+              const data = await response.json()
+              if (data.success && data.user) {
+                supplierId = data.user.username
+                console.log('🔐 PRODUCT SERVICE - Found supplier ID from session:', supplierId)
+              }
+            }
+          }
+        } catch (error) {
+          console.log('❌ PRODUCT SERVICE - Session verification failed')
+        }
+      }
+      
+      if (!supplierId) {
+        console.log('❌ PRODUCT SERVICE - No supplier ID found, returning empty array')
+        return []
       }
 
       console.log('📦 PRODUCT SERVICE - Querying products for supplier_id:', supplierId)
@@ -184,33 +182,76 @@ export class ProductService {
   // Create a new product (now defaults to pending status)
   static async createProduct(productData: CreateProductData): Promise<Product | null> {
     try {
-      // Get current authenticated user
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      // Get supplier ID with multiple fallbacks
+      let supplierId: string | null = null
+      let supplierName: string | null = null
       
-      if (userError || !user) {
-        console.error('Error getting authenticated user:', userError)
+      // Method 1: Try Supabase auth first
+      try {
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        
+        if (!userError && user) {
+          console.log('✅ PRODUCT SERVICE - Creating product with authenticated user:', user.email)
+          
+          // Get supplier data from suppliers table using user email
+          const { data: supplierData, error: supplierError } = await supabase
+            .from('suppliers')
+            .select('username, name')
+            .eq('email', user.email)
+            .single()
+
+          if (!supplierError && supplierData) {
+            supplierId = supplierData.username
+            supplierName = supplierData.name || supplierData.username
+            console.log('✅ PRODUCT SERVICE - Found supplier data from DB:', { supplierId, supplierName })
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ PRODUCT SERVICE - Supabase auth failed during product creation')
+      }
+      
+      // Method 2: Fallback to localStorage
+      if (!supplierId) {
+        const supplierNameFromStorage = localStorage.getItem('supplierName')
+        if (supplierNameFromStorage) {
+          supplierId = supplierNameFromStorage
+          supplierName = supplierNameFromStorage
+          console.log('📦 PRODUCT SERVICE - Using localStorage fallback for product creation:', supplierId)
+        }
+      }
+      
+      // Method 3: Try session token
+      if (!supplierId) {
+        try {
+          const sessionToken = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1]
+          if (sessionToken) {
+            const response = await fetch('/api/auth/verify-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionToken })
+            })
+            
+            if (response.ok) {
+              const data = await response.json()
+              if (data.success && data.user) {
+                supplierId = data.user.username
+                supplierName = data.user.name || data.user.username
+                console.log('🔐 PRODUCT SERVICE - Found supplier from session for product creation:', supplierId)
+              }
+            }
+          }
+        } catch (error) {
+          console.log('❌ PRODUCT SERVICE - Session verification failed during product creation')
+        }
+      }
+      
+      if (!supplierId) {
+        console.error('❌ PRODUCT SERVICE - No supplier ID found for product creation')
         return null
       }
 
-      // Get supplier data from suppliers table using user email
-      const { data: supplierData, error: supplierError } = await supabase
-        .from('suppliers')
-        .select('username, name')
-        .eq('email', user.email)
-        .single()
-
-      let supplierId: string
-      let supplierName: string
-      if (supplierError || !supplierData) {
-        // Fallback to localStorage for backwards compatibility
-        supplierId = localStorage.getItem('supplierName') || 'Unknown User'
-        supplierName = localStorage.getItem('supplierName') || 'Unknown User'
-      } else {
-        // Use the actual data from suppliers table
-        supplierId = supplierData.username
-        supplierName = supplierData.name || supplierData.username
-      }
-
+      console.log('📦 PRODUCT SERVICE - Creating product with supplier_id:', supplierId)
+      
       const { data, error } = await supabase
         .from('products')
         .insert({
@@ -228,6 +269,7 @@ export class ProductService {
         return null
       }
 
+      console.log('✅ PRODUCT SERVICE - Product created successfully:', data.id)
       return data
     } catch (error) {
       console.error('Error in createProduct:', error)
@@ -355,9 +397,37 @@ export class ProductService {
   // Upload image to Supabase Storage
   static async uploadImage(file: File): Promise<string | null> {
     try {
-      const supplierName = localStorage.getItem('supplierName') || 'unknown'
+      // Get supplier name with fallback
+      let supplierName = 'unknown'
+      
+      // Try to get from localStorage first (most reliable fallback)
+      const supplierNameFromStorage = localStorage.getItem('supplierName')
+      if (supplierNameFromStorage) {
+        supplierName = supplierNameFromStorage
+      } else {
+        // Try Supabase auth as fallback
+        try {
+          const { data: { user }, error: userError } = await supabase.auth.getUser()
+          if (!userError && user) {
+            const { data: supplierData, error: supplierError } = await supabase
+              .from('suppliers')
+              .select('username')
+              .eq('email', user.email)
+              .single()
+            
+            if (!supplierError && supplierData) {
+              supplierName = supplierData.username
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ Upload image - Supabase auth failed, using default supplier name')
+        }
+      }
+      
       const fileExt = file.name.split('.').pop()
       const fileName = `${supplierName}/${Date.now()}.${fileExt}`
+
+      console.log('📤 Uploading image:', fileName)
 
       const { data, error } = await supabase.storage
         .from('product-images')
@@ -373,6 +443,7 @@ export class ProductService {
         .from('product-images')
         .getPublicUrl(fileName)
 
+      console.log('✅ Image uploaded successfully:', urlData.publicUrl)
       return urlData.publicUrl
     } catch (error) {
       console.error('Error in uploadImage:', error)

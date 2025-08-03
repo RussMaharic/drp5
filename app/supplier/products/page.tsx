@@ -65,13 +65,54 @@ export default function MyProductsPage() {
               const fetchProducts = async () => {
                 try {
                   setLoading(true)
-                  const data = await ProductService.getSupplierProducts()
-                  setProducts(data)
+                  
+                  // Get supplier name from localStorage for backwards compatibility
+                  const supplierName = localStorage.getItem('supplierName')
+                  console.log('Supplier name from localStorage:', supplierName)
+                  
+                  // Build URL with supplier name parameter for backwards compatibility
+                  let url = '/api/products/supplier'
+                  const params = new URLSearchParams()
+                  
+                  if (supplierName) {
+                    params.append('supplierName', supplierName)
+                  }
+                  
+                  if (params.toString()) {
+                    url += `?${params.toString()}`
+                  }
+                  
+                  console.log('Fetching products from:', url)
+                  
+                  const response = await fetch(url)
+                  const data = await response.json()
+
+                  console.log('API Response:', { status: response.status, data })
+
+                  if (response.ok) {
+                    setProducts(data.products || [])
+                    console.log('Products set:', data.products)
+                    if (data.products && data.products.length > 0) {
+                      toast({
+                        title: "Products Loaded",
+                        description: `Found ${data.products.length} products`,
+                      })
+                    } else {
+                      console.log('No products found')
+                      toast({
+                        title: "No Products Found",
+                        description: "You haven't submitted any products yet.",
+                      })
+                    }
+                  } else {
+                    console.error('API Error:', data)
+                    throw new Error(data.error || 'Failed to fetch products')
+                  }
                 } catch (error) {
                   console.error('Error fetching products:', error)
                   toast({
                     title: "Error",
-                    description: "Failed to fetch products",
+                    description: `Failed to fetch products: ${error.message}`,
                     variant: "destructive",
                   })
                 } finally {
@@ -83,15 +124,39 @@ export default function MyProductsPage() {
                 if (!confirm("Are you sure you want to delete this product?")) return
 
                 try {
-                  const success = await ProductService.deleteProduct(productId)
-                  if (success) {
+                  // Get supplier name from localStorage for backwards compatibility
+                  const supplierName = localStorage.getItem('supplierName')
+                  console.log('Supplier name from localStorage for delete:', supplierName)
+                  
+                  // Build URL with supplier name parameter for backwards compatibility
+                  let url = `/api/products/supplier/${productId}`
+                  const params = new URLSearchParams()
+                  
+                  if (supplierName) {
+                    params.append('supplierName', supplierName)
+                  }
+                  
+                  if (params.toString()) {
+                    url += `?${params.toString()}`
+                  }
+                  
+                  const response = await fetch(url, {
+                    method: 'DELETE',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    }
+                  })
+                  
+                  const data = await response.json()
+
+                  if (response.ok && data.success) {
                     toast({
                       title: "Product Deleted Successfully!",
                       description: "Product has been successfully deleted",
                     })
                     fetchProducts() // Refresh the list
                   } else {
-                    throw new Error("Failed to delete product")
+                    throw new Error(data.error || "Failed to delete product")
                   }
                 } catch (error) {
                   console.error('Error deleting product:', error)

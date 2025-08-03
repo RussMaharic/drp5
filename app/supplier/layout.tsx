@@ -34,7 +34,7 @@ export default function SupplierLayout({ children }: SupplierLayoutProps) {
     try {
       console.log('🔍 LAYOUT - Checking user authentication...')
       
-      // First, check if we have a session token from the full auth system
+      // Method 1: Check if we have a session token from the full auth system
       const sessionToken = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1]
       
       if (sessionToken) {
@@ -63,13 +63,15 @@ export default function SupplierLayout({ children }: SupplierLayoutProps) {
             })
             setLoading(false)
             return
+          } else {
+            console.log('❌ LAYOUT - Session verification failed:', data.error)
           }
         } catch (error) {
-          console.log('❌ LAYOUT - Session verification failed:', error)
+          console.log('❌ LAYOUT - Session verification request failed:', error)
         }
       }
       
-      // Try to get user from Supabase auth as fallback
+      // Method 2: Try to get user from Supabase auth as fallback
       let user = null
       let error = null
       

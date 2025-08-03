@@ -218,9 +218,33 @@ export default function ListProductPage() {
     try {
       console.log('Creating product with data:', formData)
       
-      const product = await ProductService.createProduct(formData)
+      // Get supplier name from localStorage for backwards compatibility
+      const supplierName = localStorage.getItem('supplierName')
+      console.log('Supplier name from localStorage:', supplierName)
+      
+      // Build URL with supplier name parameter for backwards compatibility
+      let url = '/api/products/supplier'
+      const params = new URLSearchParams()
+      
+      if (supplierName) {
+        params.append('supplierName', supplierName)
+      }
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`
+      }
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData)
+      })
+      
+      const data = await response.json()
 
-      if (product) {
+      if (response.ok && data.product) {
         toast({
           title: "Product Created Successfully!",
           description: "Your product has been added to the marketplace.",
@@ -235,7 +259,7 @@ export default function ListProductPage() {
         })
         setPriceInput("") // Reset price input display
       } else {
-        throw new Error("Failed to create product")
+        throw new Error(data.error || "Failed to create product")
       }
     } catch (error) {
       console.error('Error creating product:', error)
