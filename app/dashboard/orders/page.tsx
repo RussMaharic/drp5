@@ -11,8 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
-import { Search, Filter, Download, Package, User, Calendar, DollarSign, RefreshCw, Store, ShoppingCart, MapPin } from "lucide-react";
+import { Search, Filter, Download, Package, User, Calendar, DollarSign, RefreshCw, Store, ShoppingCart, MapPin, X, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 interface Order {
   id: string;
@@ -57,6 +59,14 @@ interface Order {
     price: number;
     sku: string | null;
   }[];
+  // Enhanced status fields
+  displayFulfillmentStatus?: string;
+  displayFinancialStatus?: string;
+  cancelled?: boolean;
+  cancelledAt?: string;
+  cancelReason?: string;
+  confirmed?: boolean;
+  fullyPaid?: boolean;
 }
 
 export default function OrdersPage() {
@@ -70,6 +80,9 @@ export default function OrdersPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [productFilter, setProductFilter] = useState("all");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
+  const [orderStatuses, setOrderStatuses] = useState<Record<string, any>>({});
+  const [loadingStatuses, setLoadingStatuses] = useState<Record<string, boolean>>({});
+  const [cancellingOrders, setCancellingOrders] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
   // Get current store info
@@ -82,6 +95,8 @@ export default function OrdersPage() {
       router.push('/connect-store');
     }
   }, [selectedStore, layoutLoading]);
+
+  // Removed auto-fetch - users will manually refresh status as needed
 
   useEffect(() => {
     filterOrders();
@@ -124,22 +139,28 @@ export default function OrdersPage() {
       }
 
       // Normalize the order data to handle different API formats
-      const normalizedOrders = (data.orders || []).map((order: any) => ({
-        id: order.id,
-        orderNumber: order.orderNumber || order.order_number || order.name,
-        name: order.name,
-        customerName: order.customerName || 'Guest',
-        customerEmail: order.customerEmail || 'No email',
-        customerPhone: order.customerPhone || null,
-        shippingAddress: order.shippingAddress || null,
-        billingAddress: order.billingAddress || null,
-        status: order.status || 'pending',
-        financialStatus: order.financialStatus || order.financial_status || 'pending',
-        amount: order.amount || 0,
-        currency: order.currency || 'INR',
-        date: order.date || order.created_at,
-        lineItems: order.lineItems || []
-      }));
+      const normalizedOrders = (data.orders || []).map((order: any) => {
+        console.log(`📦 Processing order ID: ${order.id}, Order Number: ${order.orderNumber || order.order_number || order.name}`);
+        return {
+          id: order.id,
+          orderNumber: order.orderNumber || order.order_number || order.name,
+          name: order.name,
+          customerName: order.customerName || 'Guest',
+          customerEmail: order.customerEmail || 'No email',
+          customerPhone: order.customerPhone || null,
+          shippingAddress: order.shippingAddress || null,
+          billingAddress: order.billingAddress || null,
+          status: order.status || 'pending',
+          financialStatus: order.financialStatus || order.financial_status || 'pending',
+          amount: order.amount || 0,
+          currency: order.currency || 'INR',
+          date: order.date || order.created_at,
+          lineItems: order.lineItems || [],
+          // Enhanced status fields for better tracking
+          cancelled: order.cancelled,
+          confirmed: order.confirmed
+        };
+      });
 
       setOrders(normalizedOrders);
       
@@ -288,12 +309,203 @@ export default function OrdersPage() {
   };
 
   const handleRefresh = () => {
+    // Clear cached statuses when refreshing orders
+    setOrderStatuses({});
     fetchOrders();
   };
 
   const clearFilters = () => {
-                  setSearchTerm("");
-              setProductFilter("all");
+    setSearchTerm("");
+    setProductFilter("all");
+  };
+
+  // Fetch individual order status
+  const fetchOrderStatus = async (orderId: string) => {
+    if (!selectedStore) return;
+
+    console.log(`🔍 Fetching status for order ID: ${orderId} from store: ${selectedStore}`);
+    setLoadingStatuses(prev => ({ ...prev, [orderId]: true }));
+
+    try {
+      const response = await fetch(`/api/orders/${orderId}?shop=${selectedStore}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ Successfully fetched status for order ${orderId}:`, data.order);
+        setOrderStatuses(prev => ({ ...prev, [orderId]: data.order }));
+        toast({
+          title: "Success",
+          description: `Status updated for order #${orderId}`,
+        });
+      } else {
+        const errorData = await response.json();
+        console.error(`❌ Failed to fetch status for order ${orderId}:`, errorData);
+        toast({
+          title: "Error",
+          description: errorData.error || "Failed to fetch order status",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error fetching order status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch order status",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingStatuses(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
+
+  // Cancel order function
+  const cancelOrder = async (orderId: string, reason: string = 'other') => {
+    if (!selectedStore) return;
+
+    setCancellingOrders(prev => ({ ...prev, [orderId]: true }));
+
+    try {
+      const response = await fetch(`/api/orders/${orderId}/cancel?shop=${selectedStore}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reason,
+          restock: true,
+          notifyCustomer: true
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Update local order state
+        setOrders(prev => prev.map(order => 
+          order.id === orderId 
+            ? { ...order, status: 'cancelled', cancelled: true, cancelledAt: new Date().toISOString() }
+            : order
+        ));
+
+        // Update order status cache
+        setOrderStatuses(prev => ({ 
+          ...prev, 
+          [orderId]: { 
+            ...prev[orderId], 
+            cancelled: true, 
+            cancelledAt: new Date().toISOString(),
+            displayFulfillmentStatus: 'Cancelled'
+          }
+        }));
+
+        toast({
+          title: "Success",
+          description: "Order cancelled successfully",
+        });
+      } else {
+        const errorData = await response.json();
+        toast({
+          title: "Error",
+          description: errorData.error || "Failed to cancel order",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error canceling order:', error);
+      toast({
+        title: "Error",
+        description: "Failed to cancel order",
+        variant: "destructive",
+      });
+    } finally {
+      setCancellingOrders(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
+
+  // Get status badge for fulfillment status with enhanced confirmed/cancelled logic
+  const getFulfillmentStatusBadge = (order: Order, detailedStatus?: any) => {
+    // If we have detailed status from API, use it
+    if (detailedStatus) {
+      const status = detailedStatus.fulfillmentStatus;
+      const displayStatus = detailedStatus.displayFulfillmentStatus;
+      const cancelled = detailedStatus.cancelled;
+      const confirmed = detailedStatus.confirmed;
+
+      // Priority: cancelled > confirmed > fulfillment status
+      if (cancelled) {
+        return <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300">Cancelled</Badge>;
+      }
+
+      if (confirmed) {
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-300">Confirmed</Badge>;
+      }
+
+      // Use display status if available, otherwise fallback to status
+      const finalStatus = displayStatus || status;
+
+      switch (finalStatus?.toLowerCase()) {
+        case 'confirmed':
+        case 'confirmed_fulfilled':
+        case 'confirmed & fulfilled':
+          return <Badge className="bg-blue-100 text-blue-800 border-blue-300">Confirmed</Badge>;
+        case 'confirmed_partial':
+          return <Badge className="bg-indigo-100 text-indigo-800 border-indigo-300">Confirmed (Partial)</Badge>;
+        case 'fulfilled':
+          return <Badge className="bg-green-100 text-green-800 border-green-300">Fulfilled</Badge>;
+        case 'partially_fulfilled':
+        case 'partial':
+          return <Badge className="bg-indigo-100 text-indigo-800 border-indigo-300">Partially Fulfilled</Badge>;
+        case 'unfulfilled':
+        case 'pending':
+          return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300">Unfulfilled</Badge>;
+        case 'cancelled':
+          return <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300">Cancelled</Badge>;
+        case 'restocked':
+          return <Badge className="bg-gray-100 text-gray-800 border-gray-300">Restocked</Badge>;
+        default:
+          return <Badge variant="secondary" className="border">{finalStatus || 'Unknown'}</Badge>;
+      }
+    }
+
+    // Default state - show "Refresh" badge to prompt user to check status
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => fetchOrderStatus(order.id)}
+        disabled={loadingStatuses[order.id]}
+        className="h-6 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300"
+      >
+        {loadingStatuses[order.id] ? (
+          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />
+        ) : (
+          <RefreshCw className="h-3 w-3 mr-1" />
+        )}
+        {loadingStatuses[order.id] ? 'Loading...' : 'Refresh'}
+      </Button>
+    );
+  };
+
+  // Get status badge for financial status
+  const getFinancialStatusBadge = (order: Order, detailedStatus?: any) => {
+    const status = detailedStatus?.displayFinancialStatus || detailedStatus?.financialStatus || order.financialStatus;
+
+    switch (status?.toLowerCase()) {
+      case 'paid':
+        return <Badge className="bg-green-100 text-green-800">Paid</Badge>;
+      case 'partially_paid':
+        return <Badge className="bg-blue-100 text-blue-800">Partially Paid</Badge>;
+      case 'pending':
+        return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>;
+      case 'refunded':
+        return <Badge className="bg-purple-100 text-purple-800">Refunded</Badge>;
+      case 'partially_refunded':
+        return <Badge className="bg-purple-100 text-purple-800">Partially Refunded</Badge>;
+      case 'voided':
+        return <Badge variant="destructive">Voided</Badge>;
+      default:
+        return <Badge variant="secondary">{status || 'Unknown'}</Badge>;
+    }
   };
 
   if (layoutLoading) {
@@ -339,11 +551,11 @@ export default function OrdersPage() {
             <Button onClick={handleRefresh} variant="outline" size="sm" disabled={loading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Refresh
-              </Button>
+            </Button>
             <Button onClick={exportOrders} variant="outline" size="sm" disabled={filteredOrders.length === 0}>
               <Download className="h-4 w-4 mr-2" />
               Export
-                </Button>
+            </Button>
           </div>
         </div>
 
@@ -450,27 +662,29 @@ export default function OrdersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                  <TableHead>Order #</TableHead>
+                    <TableHead>Order #</TableHead>
                     <TableHead>Products</TableHead>
                     <TableHead>Address</TableHead>
                     <TableHead>Quantities</TableHead>
                     <TableHead>Amount</TableHead>
+                    <TableHead>Fulfillment Status</TableHead>
                     <TableHead>Date</TableHead>
+                    <TableHead>Cancel</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8">
+                    <TableCell colSpan={8} className="text-center py-8">
                       <div className="flex items-center justify-center">
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-2"></div>
                         Loading orders...
-                          </div>
-                        </TableCell>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={8} className="text-center py-8 text-gray-500">
                       {orders.length === 0 ? 'No orders found for this store' : 'No orders match your filters'}
                     </TableCell>
                   </TableRow>
@@ -600,11 +814,73 @@ export default function OrdersPage() {
                         </TableCell>
                       <TableCell className="font-medium">
                         {formatCurrency(order.amount, order.currency)}
-                        </TableCell>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center space-x-2">
+                          {getFulfillmentStatusBadge(order, orderStatuses[order.id])}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => fetchOrderStatus(order.id)}
+                            disabled={loadingStatuses[order.id]}
+                            className="h-6 w-6 p-0"
+                          >
+                            <RefreshCw className={`h-3 w-3 ${loadingStatuses[order.id] ? 'animate-spin' : ''}`} />
+                          </Button>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm">
                         {formatDate(order.date)}
-                        </TableCell>
-                      </TableRow>
+                      </TableCell>
+                      <TableCell>
+                        {/* Cancel Order Button or Cancelled Indicator */}
+                        {!order.cancelled && !orderStatuses[order.id]?.cancelled ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="text-red-600 hover:text-red-700"
+                                disabled={cancellingOrders[order.id]}
+                              >
+                                {cancellingOrders[order.id] ? (
+                                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600" />
+                                ) : (
+                                  <X className="h-3 w-3" />
+                                )}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="flex items-center">
+                                  <AlertTriangle className="h-4 w-4 mr-2 text-red-600" />
+                                  Cancel Order #{order.orderNumber || order.name}
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This action will cancel the order and restock the items. The customer will be notified by email. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Don't Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => cancelOrder(order.id, 'other')}
+                                  className="bg-red-600 hover:bg-red-700"
+                                >
+                                  Cancel Order
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : (
+                          <div className="flex items-center justify-center">
+                            <div className="flex items-center space-x-1 text-gray-500">
+                              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                              <span className="text-xs font-medium">Cancelled</span>
+                            </div>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
                   ))
                 )}
                 </TableBody>

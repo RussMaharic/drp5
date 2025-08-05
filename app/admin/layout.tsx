@@ -95,7 +95,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <Shield className="h-8 w-8 text-purple-600 mr-3" />
+              <img src="/Drpshippr.png" alt="Drpshippr" className="h-11 w-11 mr-0 mt-1" />
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">
                 Admin Dashboard
               </h1>

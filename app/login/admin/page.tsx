@@ -36,8 +36,12 @@ export default function AdminLogin() {
     try {
       console.log('🔍 Admin login attempt:', { username, passwordLength: password.length })
       
+      // Get admin credentials from environment variables
+      const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME || "admin"
+      const adminPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123"
+      
       // Simple demo authentication - in production, this should be properly secured
-      if (username.trim() === "admin" && password.trim() === "admin123") {
+      if (username.trim() === adminUsername && password.trim() === adminPassword) {
         console.log('✅ Admin credentials valid, setting localStorage...')
         localStorage.setItem('adminUser', username.trim())
         
@@ -60,8 +64,8 @@ export default function AdminLogin() {
         console.log('❌ Invalid credentials:', { 
           username: username.trim(), 
           password: '***', 
-          usernameMatch: username.trim() === "admin",
-          passwordMatch: password.trim() === "admin123"
+          usernameMatch: username.trim() === adminUsername,
+          passwordMatch: password.trim() === adminPassword
         })
         
         toast({

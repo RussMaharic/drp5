@@ -11,9 +11,9 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <Package className="h-8 w-8 text-blue-600 mr-3" />
+              <img src="/Drpshippr.png" alt="Drpshippr" className="h-11 w-11 mr-0 mt-1" />
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-                Drpshipper
+                Drpshippr
               </h1>
             </div>
           </div>
@@ -24,11 +24,11 @@ export default function HomePage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-16">
           <h1 className="text-4xl md:text-6xl font-bold text-gray-900 dark:text-white mb-6">
-            <span className="text-blue-600 dark:text-blue-400">The Supplier-to-Shopify</span>
-            <br />Product Sync Engine
+            <span className="text-blue-600 dark:text-blue-400">India’s First AI-Powered Dropshipping Engine</span>
+            <br />Built to Automate Your Entire E-commerce Journey
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
-            Manage your catalog, control quality, and scale your reach.
+          From product research to ad creation, call confirmation to product syncing let AI run the store while you scale the brand.
           </p>
         </div>
 
