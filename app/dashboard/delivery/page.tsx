@@ -216,6 +216,8 @@ export default function DeliveryPage() {
         return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300">Pending</Badge>
       case 'cancelled':
         return <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300">Cancelled</Badge>
+      case 'rto':
+        return <Badge className="bg-gray-100 text-gray-800 border-gray-300">RTO</Badge>
       case 'in_progress':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-300">In Progress</Badge>
       default:
