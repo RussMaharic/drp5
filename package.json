@@ -1,5 +1,4 @@
 {
-<<<<<<< HEAD
   "name": "my-v0-project",
   "version": "0.1.0",
   "private": true,
@@ -39,6 +38,7 @@
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
     "@supabase/supabase-js": "^2.53.0",
+    "@vercel/postgres": "^0.10.0",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -70,9 +70,3 @@
     "typescript": "^5"
   }
 }
-=======
-  "dependencies": {
-    "@vercel/postgres": "^0.10.0"
-  }
-}
->>>>>>> c6394c39e39c4a44fead85181c40c322bde8bb96

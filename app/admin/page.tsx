@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/components/ui/use-toast"
-import { Search, Filter, Download, Package, User, Calendar, DollarSign, RefreshCw, Store, LogOut, MapPin, Truck, Plus, Edit, ExternalLink, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react"
+import { Search, Filter, Download, Package, User, Calendar, DollarSign, RefreshCw, Store, LogOut, MapPin, Truck, Plus, Edit, ExternalLink, CheckCircle, XCircle, Clock, AlertTriangle, RotateCcw } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { TokenManager } from "@/lib/token-manager"
@@ -898,6 +898,14 @@ export default function AdminDashboard() {
                             >
                               <AlertTriangle className="h-4 w-4 mr-2" />
                               Undelivered
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'rto', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-gray-600 focus:text-gray-600"
+                            >
+                              <RotateCcw className="h-4 w-4 mr-2" />
+                              RTO
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
