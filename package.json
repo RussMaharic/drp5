@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "my-v0-project",
   "version": "0.1.0",
   "private": true,
@@ -69,3 +70,9 @@
     "typescript": "^5"
   }
 }
+=======
+  "dependencies": {
+    "@vercel/postgres": "^0.10.0"
+  }
+}
+>>>>>>> c6394c39e39c4a44fead85181c40c322bde8bb96
