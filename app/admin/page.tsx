@@ -844,28 +844,28 @@ export default function AdminDashboard() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'fulfilled', order.orderNumber)}
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'confirmed', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-blue-500 focus:text-blue-500"
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Confirmed
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'delivered', order.orderNumber)}
                               disabled={statusUpdateLoading === order.id}
                               className="text-green-600 focus:text-green-600"
                             >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              Mark as Fulfilled
+                              <Truck className="h-4 w-4 mr-2" />
+                              Delivered
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'partially_fulfilled', order.orderNumber)}
-                              disabled={statusUpdateLoading === order.id}
-                              className="text-blue-600 focus:text-blue-600"
-                            >
-                              <Clock className="h-4 w-4 mr-2" />
-                              Mark as Partially Fulfilled
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'pending', order.orderNumber)}
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'in_transit', order.orderNumber)}
                               disabled={statusUpdateLoading === order.id}
                               className="text-yellow-600 focus:text-yellow-600"
                             >
-                              <AlertTriangle className="h-4 w-4 mr-2" />
-                              Mark as Pending
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              In Transit
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => handleStatusUpdate(order.id, order.storeName, 'cancelled', order.orderNumber)}
@@ -873,7 +873,31 @@ export default function AdminDashboard() {
                               className="text-red-600 focus:text-red-600"
                             >
                               <XCircle className="h-4 w-4 mr-2" />
-                              Mark as Cancelled
+                              Cancelled
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'pickup_initiated', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-purple-600 focus:text-purple-600"
+                            >
+                              <Package className="h-4 w-4 mr-2" />
+                              Pickup Initiated
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'pickup_aligned', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-indigo-600 focus:text-indigo-600"
+                            >
+                              <MapPin className="h-4 w-4 mr-2" />
+                              Pickup Aligned
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'undelivered', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-orange-600 focus:text-orange-600"
+                            >
+                              <AlertTriangle className="h-4 w-4 mr-2" />
+                              Undelivered
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

@@ -84,9 +84,49 @@ export async function GET(request: Request) {
       }
     }
 
-    // Get orders from Supabase (much faster than Shopify API)
-    console.log(`Fetching orders for supplier: ${supplierId}`)
+    // First, get all product IDs for this supplier
+    console.log(`Getting products for supplier: ${supplierId}`)
+    const { data: supplierProducts, error: productsError } = await supabase
+      .from('products')
+      .select('id')
+      .eq('supplier_id', supplierId)
+
+    if (productsError) {
+      console.error('Error fetching supplier products:', productsError)
+      return NextResponse.json({ error: "Failed to fetch supplier products" }, { status: 500 })
+    }
+
+    const supplierProductIds = supplierProducts?.map(p => p.id) || []
+    console.log(`Found ${supplierProductIds.length} products for supplier ${supplierId}`)
+
+    if (supplierProductIds.length === 0) {
+      console.log('No products found for this supplier')
+      return NextResponse.json({ orders: [] })
+    }
+
+    // Get orders that contain any products from this supplier's catalog
+    console.log(`Fetching orders containing supplier products from all accounts`)
     
+    // First get unique order IDs that contain supplier products
+    const { data: orderIds, error: orderIdsError } = await supabase
+      .from('supplier_order_items')
+      .select('supplier_order_id')
+      .in('supplier_product_id', supplierProductIds)
+
+    if (orderIdsError) {
+      console.error('Error fetching order IDs for supplier products:', orderIdsError)
+      return NextResponse.json({ error: "Failed to fetch order IDs" }, { status: 500 })
+    }
+
+    const uniqueOrderIds = [...new Set(orderIds?.map(item => item.supplier_order_id) || [])]
+    console.log(`Found ${uniqueOrderIds.length} unique orders containing supplier products`)
+
+    if (uniqueOrderIds.length === 0) {
+      console.log('No orders found containing supplier products')
+      return NextResponse.json({ orders: [] })
+    }
+
+    // Now get the full order details for those orders
     const { data: supplierOrders, error: ordersError } = await supabase
       .from('supplier_orders')
       .select(`
@@ -103,7 +143,7 @@ export async function GET(request: Request) {
           sku
         )
       `)
-      .eq('supplier_id', supplierId)
+      .in('id', uniqueOrderIds)
       .order('order_date', { ascending: false })
 
     if (ordersError) {
@@ -126,33 +166,42 @@ export async function GET(request: Request) {
           
           if (syncResponse.ok) {
             console.log('✅ Auto sync completed, refetching orders...')
-            // Refetch after sync
-            const { data: freshOrders } = await supabase
-              .from('supplier_orders')
-              .select(`
-                *,
-                supplier_order_items (
-                  id,
-                  shopify_line_item_id,
-                  shopify_product_id,
-                  supplier_product_id,
-                  product_name,
-                  quantity,
-                  price,
-                  variant_id,
-                  sku
-                )
-              `)
-              .eq('supplier_id', supplierId)
-              .order('order_date', { ascending: false })
+            // Refetch after sync using the same two-step logic as the main query
+            const { data: freshOrderIds } = await supabase
+              .from('supplier_order_items')
+              .select('supplier_order_id')
+              .in('supplier_product_id', supplierProductIds)
+
+            const freshUniqueOrderIds = [...new Set(freshOrderIds?.map(item => item.supplier_order_id) || [])]
             
-            console.log(`📦 After sync: Found ${freshOrders?.length || 0} orders`)
-            
-            if (freshOrders && freshOrders.length > 0) {
-              return NextResponse.json({ 
-                orders: transformSupplierOrdersForResponse(freshOrders),
-                synced: true
-              })
+            if (freshUniqueOrderIds.length > 0) {
+              const { data: freshOrders } = await supabase
+                .from('supplier_orders')
+                .select(`
+                  *,
+                  supplier_order_items (
+                    id,
+                    shopify_line_item_id,
+                    shopify_product_id,
+                    supplier_product_id,
+                    product_name,
+                    quantity,
+                    price,
+                    variant_id,
+                    sku
+                  )
+                `)
+                .in('id', freshUniqueOrderIds)
+                .order('order_date', { ascending: false })
+              
+              console.log(`📦 After sync: Found ${freshOrders?.length || 0} orders`)
+              
+              if (freshOrders && freshOrders.length > 0) {
+                return NextResponse.json({ 
+                  orders: transformSupplierOrdersForResponse(freshOrders, supplierProductIds),
+                  synced: true
+                })
+              }
             }
           } else {
             console.log('❌ Auto sync failed:', syncResult)
@@ -167,7 +216,7 @@ export async function GET(request: Request) {
     }
 
     // Transform Supabase orders to match the expected response format
-    const transformedOrders = transformSupplierOrdersForResponse(supplierOrders)
+    const transformedOrders = transformSupplierOrdersForResponse(supplierOrders, supplierProductIds)
 
     console.log(`Returning ${transformedOrders.length} transformed orders`)
 
@@ -182,7 +231,7 @@ export async function GET(request: Request) {
 }
 
 // Helper function to transform Supabase orders to response format
-function transformSupplierOrdersForResponse(supplierOrders: any[]) {
+function transformSupplierOrdersForResponse(supplierOrders: any[], supplierProductIds: string[]) {
   return supplierOrders.map(order => {
     // Parse shipping and billing addresses from JSON
     let shippingAddress = null
@@ -203,6 +252,16 @@ function transformSupplierOrdersForResponse(supplierOrders: any[]) {
       console.log('Error parsing address data:', error)
     }
 
+    // Filter order items to only include products from this supplier
+    const supplierOrderItems = order.supplier_order_items?.filter((item: any) => 
+      supplierProductIds.includes(item.supplier_product_id)
+    ) || []
+
+    // Calculate supplier-specific amount based on their products only
+    const supplierAmount = supplierOrderItems.reduce((total: number, item: any) => {
+      return total + (parseFloat(item.price || '0') * item.quantity)
+    }, 0)
+
     return {
       id: order.shopify_order_id,
       orderNumber: order.order_number,
@@ -213,11 +272,11 @@ function transformSupplierOrdersForResponse(supplierOrders: any[]) {
       billingAddress: billingAddress,
       status: order.status,
       financialStatus: order.financial_status,
-      amount: parseFloat(order.total_amount || '0'),
+      amount: supplierAmount, // Show only the amount for supplier's products
       currency: order.currency,
       date: order.order_date,
       store: order.store_url,
-      supplierProducts: order.supplier_order_items?.map((item: any) => ({
+      supplierProducts: supplierOrderItems.map((item: any) => ({
         id: item.shopify_line_item_id,
         name: item.product_name,
         quantity: item.quantity,
@@ -226,7 +285,7 @@ function transformSupplierOrdersForResponse(supplierOrders: any[]) {
         variantId: item.variant_id,
         shopifyProductId: item.shopify_product_id,
         sku: item.sku
-      })) || []
+      }))
     }
   })
 }
