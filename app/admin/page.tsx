@@ -9,9 +9,17 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/components/ui/use-toast"
-import { Search, Filter, Download, Package, User, Calendar, DollarSign, RefreshCw, Store, LogOut, MapPin } from "lucide-react"
+import { Search, Filter, Download, Package, User, Calendar, DollarSign, RefreshCw, Store, LogOut, MapPin, Truck, Plus, Edit, ExternalLink, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { TokenManager } from "@/lib/token-manager"
+import { createClient } from '@supabase/supabase-js'
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 interface AdminOrder {
   id: string
@@ -71,13 +79,220 @@ export default function AdminDashboard() {
   const [selectedAddress, setSelectedAddress] = useState<any>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authLoading, setAuthLoading] = useState(true)
+  const [trackingDialogOpen, setTrackingDialogOpen] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null)
+  const [trackingData, setTrackingData] = useState<{[key: string]: any}>({})
+  const [trackingForm, setTrackingForm] = useState({
+    trackingNumber: '',
+    carrier: '',
+    trackingUrl: '',
+    notes: ''
+  })
+  const [statusUpdateLoading, setStatusUpdateLoading] = useState<string | null>(null)
+
+  // Function to update order status
+  const handleStatusUpdate = async (orderId: string, store: string, newStatus: string, orderNumber: number) => {
+    try {
+      setStatusUpdateLoading(orderId)
+      
+      // First check if order status exists
+      const { data: existingStatus } = await supabase
+        .from('order_status')
+        .select()
+        .eq('shopify_order_id', orderId)
+        .eq('store_url', store)
+        .single()
+
+      let dbError
+      if (existingStatus) {
+        // Update existing record
+        const { error } = await supabase
+          .from('order_status')
+          .update({
+            status: newStatus,
+            updated_by: 'admin',
+            updated_at: new Date().toISOString()
+          })
+          .eq('shopify_order_id', orderId)
+          .eq('store_url', store)
+        dbError = error
+      } else {
+        // Insert new record
+        const { error } = await supabase
+          .from('order_status')
+          .insert({
+            shopify_order_id: orderId,
+            store_url: store,
+            order_number: orderNumber.toString(),
+            status: newStatus,
+            updated_by: 'admin',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        dbError = error
+      }
+
+      if (dbError) {
+        throw new Error(`Database error: ${dbError.message}`)
+      }
+
+      // Then update Shopify order status
+      const response = await fetch(`/api/shopify-orders?shop=${store}&orderId=${orderId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fulfillmentStatus: newStatus
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(`Shopify API error: ${errorData.error}`)
+      }
+
+      // Update local state
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order.id === orderId 
+            ? { ...order, status: newStatus }
+            : order
+        )
+      )
+
+      toast({
+        title: "Status Updated",
+        description: `Order status has been updated to ${newStatus}`,
+      })
+
+    } catch (error) {
+      console.error('Error updating status:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update order status",
+        variant: "destructive"
+      })
+    } finally {
+      setStatusUpdateLoading(null)
+    }
+  }
   const { toast } = useToast()
   const router = useRouter()
+
+  // Helper function to render status badge
+  const getStatusBadge = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'fulfilled':
+        return <Badge className="bg-green-100 text-green-800 border-green-300">Fulfilled</Badge>
+      case 'partially_fulfilled':
+      case 'partial':
+        return <Badge className="bg-indigo-100 text-indigo-800 border-indigo-300">Partially Fulfilled</Badge>
+      case 'unfulfilled':
+      case 'pending':
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300">Pending</Badge>
+      case 'cancelled':
+        return <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300">Cancelled</Badge>
+      case 'in_progress':
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-300">In Progress</Badge>
+      default:
+        return <Badge variant="secondary" className="border">{status || 'Unknown'}</Badge>
+    }
+  }
 
   // Helper function to calculate total items in an order
   const calculateTotalItems = (lineItems: Array<{quantity: number}>) => {
     if (!lineItems || lineItems.length === 0) return 0
     return lineItems.reduce((total, item) => total + (item.quantity || 0), 0)
+  }
+
+  // Fetch tracking data for orders (same approach as delivery tab)
+  const fetchTrackingData = async () => {
+    try {
+      console.log('🔍 Fetching all tracking data from database...')
+      
+      // Fetch all tracking data without store filter (admin sees all)
+      const response = await fetch('/api/tracking')
+      if (response.ok) {
+        const data = await response.json()
+        console.log('📦 All tracking data received:', data.tracking)
+        
+        const trackingMap = data.tracking.reduce((acc: any, track: any) => {
+          acc[track.shopify_order_id] = track
+          return acc
+        }, {})
+        
+        console.log('🗺️ Tracking map created:', trackingMap)
+        setTrackingData(trackingMap)
+      } else {
+        console.error('❌ Failed to fetch tracking data:', response.status, response.statusText)
+      }
+    } catch (error) {
+      console.error('❌ Error fetching tracking data:', error)
+    }
+  }
+
+  // Add or update tracking information
+  const handleTrackingSubmit = async () => {
+    if (!selectedOrder || !trackingForm.trackingNumber) {
+      toast({
+        title: "Error",
+        description: "Please fill in the tracking number.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const response = await fetch('/api/tracking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shopifyOrderId: selectedOrder.id,
+          orderNumber: selectedOrder.orderNumber.toString(),
+          storeUrl: selectedOrder.storeName,
+          trackingNumber: trackingForm.trackingNumber,
+          carrier: trackingForm.carrier,
+          trackingUrl: trackingForm.trackingUrl,
+          notes: trackingForm.notes
+        })
+      })
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Tracking information saved successfully.",
+        })
+        setTrackingDialogOpen(false)
+        setTrackingForm({ trackingNumber: '', carrier: '', trackingUrl: '', notes: '' })
+        fetchTrackingData() // Refresh tracking data
+      } else {
+        throw new Error('Failed to save tracking information')
+      }
+    } catch (error) {
+      console.error('Error saving tracking:', error)
+      toast({
+        title: "Error",
+        description: "Failed to save tracking information.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const openTrackingDialog = (order: AdminOrder) => {
+    setSelectedOrder(order)
+    const existingTracking = trackingData[order.id]
+    if (existingTracking) {
+      setTrackingForm({
+        trackingNumber: existingTracking.tracking_number || '',
+        carrier: existingTracking.carrier || '',
+        trackingUrl: existingTracking.tracking_url || '',
+        notes: existingTracking.notes || ''
+      })
+    } else {
+      setTrackingForm({ trackingNumber: '', carrier: '', trackingUrl: '', notes: '' })
+    }
+    setTrackingDialogOpen(true)
   }
 
   const formatAddress = (address: any) => {
@@ -126,6 +341,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchAllStoresAndOrders()
+      fetchTrackingData()
     }
   }, [isAuthenticated])
 
@@ -193,7 +409,33 @@ export default function AdminDashboard() {
 
       // Sort orders by date (newest first)
       allOrders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      setOrders(allOrders)
+
+      // Fetch order statuses from the database
+      const orderIds = allOrders.map(order => order.id);
+      const { data: orderStatuses, error: statusError } = await supabase
+        .from('order_status')
+        .select('shopify_order_id, status')
+        .in('shopify_order_id', orderIds);
+
+      if (statusError) {
+        console.error('Error fetching order statuses:', statusError);
+      }
+
+      // Merge order statuses with order data
+      const statusMap = new Map();
+      if (orderStatuses) {
+        orderStatuses.forEach(status => {
+          statusMap.set(status.shopify_order_id, status.status);
+        });
+      }
+
+      const ordersWithStatus = allOrders.map(order => ({
+        ...order,
+        // Use admin-controlled status if available, otherwise use Shopify status
+        status: statusMap.get(order.id) || order.status
+      }));
+
+      setOrders(ordersWithStatus)
       
       // Extract unique products from all orders
       const allProducts = new Set<string>()
@@ -346,6 +588,10 @@ export default function AdminDashboard() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
+          <Button onClick={fetchTrackingData} variant="outline" size="sm">
+            <Package className="h-4 w-4 mr-2" />
+            Refresh Tracking
+          </Button>
           <Button onClick={exportOrders} variant="outline" size="sm">
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -457,12 +703,14 @@ export default function AdminDashboard() {
                 <TableHead>Store</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Items</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Tracking</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                  <TableCell colSpan={8} className="text-center py-8 text-gray-500">
                     No orders found
                   </TableCell>
                 </TableRow>
@@ -585,6 +833,96 @@ export default function AdminDashboard() {
                         {calculateTotalItems(order.lineItems)} item{calculateTotalItems(order.lineItems) !== 1 ? 's' : ''}
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {getStatusBadge(order.status)}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'fulfilled', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-green-600 focus:text-green-600"
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Mark as Fulfilled
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'partially_fulfilled', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-blue-600 focus:text-blue-600"
+                            >
+                              <Clock className="h-4 w-4 mr-2" />
+                              Mark as Partially Fulfilled
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'pending', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-yellow-600 focus:text-yellow-600"
+                            >
+                              <AlertTriangle className="h-4 w-4 mr-2" />
+                              Mark as Pending
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleStatusUpdate(order.id, order.storeName, 'cancelled', order.orderNumber)}
+                              disabled={statusUpdateLoading === order.id}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Mark as Cancelled
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        {statusUpdateLoading === order.id && (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        console.log('🔍 Admin - Checking tracking for order:', order.id, 'Available tracking data:', trackingData);
+                        const tracking = trackingData[order.id];
+                        console.log('📦 Admin - Tracking found for order', order.id, ':', tracking);
+                        
+                        return tracking ? (
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="default" className="flex items-center space-x-1">
+                              <Truck className="h-3 w-3" />
+                              <span className="text-xs">{tracking.carrier || 'Tracked'}</span>
+                            </Badge>
+                            {tracking.tracking_url ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => window.open(tracking.tracking_url, '_blank')}
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openTrackingDialog(order)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openTrackingDialog(order)}
+                          >
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add Tracking
+                          </Button>
+                        );
+                      })()}
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -592,6 +930,86 @@ export default function AdminDashboard() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Tracking Dialog */}
+      <Dialog open={trackingDialogOpen} onOpenChange={setTrackingDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <Truck className="h-5 w-5 mr-2" />
+              {trackingData[selectedOrder?.id || ''] ? 'Edit Tracking Information' : 'Add Tracking Information'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedOrder ? `Order #${selectedOrder.orderNumber} - ${selectedOrder.storeName}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Tracking Number *</label>
+                <Input
+                  placeholder="Enter tracking number"
+                  value={trackingForm.trackingNumber}
+                  onChange={(e) => setTrackingForm({ ...trackingForm, trackingNumber: e.target.value })}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Carrier</label>
+                <Select 
+                  value={trackingForm.carrier} 
+                  onValueChange={(value) => setTrackingForm({ ...trackingForm, carrier: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select carrier (auto-detected)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Blue Dart">Blue Dart</SelectItem>
+                    <SelectItem value="DTDC">DTDC</SelectItem>
+                    <SelectItem value="Ecom Express">Ecom Express</SelectItem>
+                    <SelectItem value="Delhivery">Delhivery</SelectItem>
+                    <SelectItem value="Xpressbees">Xpressbees</SelectItem>
+                    <SelectItem value="Shadowfax">Shadowfax</SelectItem>
+                    <SelectItem value="UPS">UPS</SelectItem>
+                    <SelectItem value="FedEx">FedEx</SelectItem>
+                    <SelectItem value="India Post">India Post</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Tracking URL (Optional)</label>
+              <Input
+                placeholder="Auto-generated or custom tracking URL"
+                value={trackingForm.trackingUrl}
+                onChange={(e) => setTrackingForm({ ...trackingForm, trackingUrl: e.target.value })}
+              />
+              <p className="text-xs text-gray-500">Leave empty to auto-generate based on carrier</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Notes (Optional)</label>
+              <Input
+                placeholder="Additional tracking notes"
+                value={trackingForm.notes}
+                onChange={(e) => setTrackingForm({ ...trackingForm, notes: e.target.value })}
+              />
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button variant="outline" onClick={() => setTrackingDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleTrackingSubmit}>
+                {trackingData[selectedOrder?.id || ''] ? 'Update Tracking' : 'Add Tracking'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 } 

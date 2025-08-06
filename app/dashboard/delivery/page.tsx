@@ -10,9 +10,16 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/components/ui/use-toast"
-import { Search, Truck, MapPin, Clock, RefreshCw, Store } from "lucide-react"
+import { Search, Truck, MapPin, Clock, RefreshCw, Store, ExternalLink, Package } from "lucide-react"
 import DashboardLayout from "@/components/dashboard-layout"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { createClient } from '@supabase/supabase-js'
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 interface Order {
   id: string;
@@ -68,6 +75,7 @@ export default function DeliveryPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
+  const [trackingData, setTrackingData] = useState<{[key: string]: any}>({});
   const { toast } = useToast();
 
   // Get current store info
@@ -76,6 +84,7 @@ export default function DeliveryPage() {
   useEffect(() => {
     if (!layoutLoading && selectedStore) {
       fetchOrders();
+      fetchTrackingData();
     } else if (!layoutLoading && !selectedStore) {
       router.push('/connect-store');
     }
@@ -139,7 +148,33 @@ export default function DeliveryPage() {
         lineItems: order.lineItems || []
       }));
 
-      setOrders(normalizedOrders);
+      // Fetch order statuses from the database
+      const orderIds = normalizedOrders.map(order => order.id);
+      const { data: orderStatuses, error: statusError } = await supabase
+        .from('order_status')
+        .select('shopify_order_id, status')
+        .eq('store_url', selectedStore)
+        .in('shopify_order_id', orderIds);
+
+      if (statusError) {
+        console.error('Error fetching order statuses:', statusError);
+      }
+
+      // Merge order statuses with order data
+      const statusMap = new Map();
+      if (orderStatuses) {
+        orderStatuses.forEach(status => {
+          statusMap.set(status.shopify_order_id, status.status);
+        });
+      }
+
+      const ordersWithStatus = normalizedOrders.map(order => ({
+        ...order,
+        // Use admin-controlled status if available, otherwise use Shopify status
+        status: statusMap.get(order.id) || order.status
+      }));
+
+      setOrders(ordersWithStatus);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch orders');
       toast({
@@ -167,40 +202,24 @@ export default function DeliveryPage() {
     setFilteredOrders(filtered);
   };
 
-  const updateDeliveryStatus = async (orderId: string, newStatus: string) => {
-    try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 500));
 
-      setOrders((prev) =>
-        prev.map((order) => (order.id === orderId ? { ...order, status: newStatus } : order)),
-      );
 
-      toast({
-        title: "Success",
-        description: `Order ${orderId} status updated to ${newStatus}`,
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update delivery status",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case "fulfilled":
-        return "default"
-      case "pending":
-        return "secondary"
-      case "cancelled":
-        return "destructive"
-      case "partial":
-        return "outline"
+  const getStatusBadge = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'fulfilled':
+        return <Badge className="bg-green-100 text-green-800 border-green-300">Fulfilled</Badge>
+      case 'partially_fulfilled':
+      case 'partial':
+        return <Badge className="bg-indigo-100 text-indigo-800 border-indigo-300">Partially Fulfilled</Badge>
+      case 'unfulfilled':
+      case 'pending':
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300">Pending</Badge>
+      case 'cancelled':
+        return <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300">Cancelled</Badge>
+      case 'in_progress':
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-300">In Progress</Badge>
       default:
-        return "secondary"
+        return <Badge variant="secondary" className="border">{status || 'Unknown'}</Badge>
     }
   };
 
@@ -276,6 +295,38 @@ export default function DeliveryPage() {
 
   const handleRefresh = () => {
     fetchOrders();
+    fetchTrackingData();
+    toast({
+      title: "Refreshed",
+      description: "Order data has been refreshed",
+    });
+  };
+
+  // Fetch tracking data for orders
+  const fetchTrackingData = async () => {
+    try {
+      if (!selectedStore) return;
+      
+      console.log('🔍 Fetching tracking data for store:', selectedStore);
+      
+      const response = await fetch(`/api/tracking?storeUrl=${selectedStore}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📦 Tracking data received:', data.tracking);
+        
+        const trackingMap = data.tracking.reduce((acc: any, track: any) => {
+          acc[track.shopify_order_id] = track;
+          return acc;
+        }, {});
+        
+        console.log('🗺️ Tracking map created:', trackingMap);
+        setTrackingData(trackingMap);
+      } else {
+        console.error('❌ Failed to fetch tracking data:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching tracking data:', error);
+    }
   };
 
   if (layoutLoading) {
@@ -315,10 +366,16 @@ export default function DeliveryPage() {
             <h1 className="text-2xl font-bold text-gray-900">Manage Delivery</h1>
             <p className="text-gray-600">Track and manage order deliveries from {currentStore?.name || selectedStore}</p>
           </div>
-          <Button onClick={handleRefresh} variant="outline" size="sm" disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <div className="flex space-x-2">
+            <Button onClick={handleRefresh} variant="outline" size="sm" disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button onClick={fetchTrackingData} variant="outline" size="sm">
+              <Package className="h-4 w-4 mr-2" />
+              Refresh Tracking
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -409,7 +466,7 @@ export default function DeliveryPage() {
                     <TableHead>Order ID</TableHead>
                     <TableHead>Address</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead>Tracking</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -517,31 +574,50 @@ export default function DeliveryPage() {
                           </div>
                         </TableCell>
                       <TableCell>
-                        <Badge
-                            variant={getStatusBadgeVariant(order.status)}
-                          className="flex items-center gap-1 w-fit"
-                        >
-                            {getStatusIcon(order.status)}
-                            {order.status.replace("_", " ").charAt(0).toUpperCase() +
-                              order.status.replace("_", " ").slice(1)}
-                        </Badge>
+                        {getStatusBadge(order.status)}
                       </TableCell>
                       <TableCell>
-                        <Select
-                            value={order.status}
-                            onValueChange={(value: string) => updateDeliveryStatus(order.id, value)}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="partial">In Transit</SelectItem>
-                              <SelectItem value="fulfilled">Delivered</SelectItem>
-                              <SelectItem value="cancelled">Cancelled</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        {(() => {
+                          console.log('🔍 Checking tracking for order:', order.id, 'Available tracking data:', trackingData);
+                          const tracking = trackingData[order.id];
+                          console.log('📦 Tracking found for order', order.id, ':', tracking);
+                          
+                          return tracking ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center space-x-2">
+                                <Package className="h-4 w-4 text-blue-600" />
+                                <div className="text-sm">
+                                  <div className="font-medium">{tracking.tracking_number}</div>
+                                  {tracking.carrier && (
+                                    <div className="text-xs text-gray-500">{tracking.carrier}</div>
+                                  )}
+                                </div>
+                              </div>
+                              {tracking.tracking_url && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => window.open(tracking.tracking_url, '_blank')}
+                                  className="text-xs h-7"
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Track Package
+                                </Button>
+                              )}
+                              {tracking.notes && (
+                                <div className="text-xs text-gray-600 italic">
+                                  {tracking.notes}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-400">
+                              No tracking available
+                            </div>
+                          );
+                        })()}
                       </TableCell>
+
                     </TableRow>
                     ))
                   )}
